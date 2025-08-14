@@ -1,1 +1,3 @@
+Sistema de gestión de inventarios diseñado con capacidad de punto de venta, actualmente en desarrollo y en fase de despliegue exclusivamente local por requerimientos de seguridad. La arquitectura está completamente contenerizada con Docker y complementada por scripts en shell que automatizan la provisión de entornos y tareas rutinarias.
 
+El backend está implementado en Rust usando el framework actix-web para servicios HTTP de alto rendimiento y SQLite como motor de base de datos ligero. El frontend se construye sobre Vite y React con TypeScript, con una futura migración a Tauri para convertir la aplicación web en un binario de escritorio multiplataforma una vez completados los módulos principales.
