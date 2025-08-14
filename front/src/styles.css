@@ -1,0 +1,17 @@
+#crear_seccion {
+  border-radius: 5px;
+  background-color: ivory;
+  margin-top: 0.5%;
+}
+
+.crear_boton {
+  background-color: red;
+}
+
+.btn_submit {
+  background-color: blue;
+}
+
+.btn_cancelar {
+  background-color: greenyellow;
+}

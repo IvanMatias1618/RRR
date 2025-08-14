@@ -1,0 +1,19 @@
+#titulo {
+  color: blue;
+}
+
+#ul_menu_cabecera {
+  list-style: none;
+  display: flex;
+  flex-direction: row;
+  background-color: darkgray;
+  justify-content: space-evenly;
+  padding: 3px;
+  border-radius: 12px;
+}
+
+.menu_cabecera_opcion {
+  background-color: beige;
+  border-radius: 8px;
+  padding: 3px;
+}
