@@ -6,12 +6,16 @@ import type { Servicio } from '../contratos/contratos';
 export class ServicioSupremo<T extends Entidad_suprema<any, any, any>>
   implements Servicio<T['crear'], T['editar'], T['valor']> {
   private url: string
-  constructor(url_base: string) { this.url = url_base; }
+  private token: string
+  constructor(url_base: string, token: string) { this.url = url_base; this.token = token; }
   async crear(datos: T['crear']): Promise<Respuesta> {
     try {
+      console.log(this.token);
       const res = await fetch(`${this.url}/crear`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json', 'Authorization': this.token
+        },
         body: JSON.stringify(datos)
       });
       const json = await res.json().catch(() => ({
@@ -70,7 +74,7 @@ export class ServicioSupremo<T extends Entidad_suprema<any, any, any>>
   async editar(nombre: string, datos: T['editar']): Promise<Respuesta> {
     const res = await fetch(`${this.url}/editar/${encodeURIComponent(nombre)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': this.token },
       body: JSON.stringify(datos),
     });
     const texto = await res.text();
@@ -91,6 +95,7 @@ export class ServicioSupremo<T extends Entidad_suprema<any, any, any>>
   async eliminar(nombre: string): Promise<Respuesta> {
     const res = await fetch(`${this.url}/${encodeURIComponent(nombre)}`, {
       method: 'DELETE',
+      headers: { 'Authorization': this.token },
     });
     const texto = await res.text();
     if (!res.ok) {

@@ -1,19 +1,22 @@
 #titulo {
-  color: blue;
+    color: #c3b2d9;
+    margin: 0;
+    padding: 0;
 }
 
 #ul_menu_cabecera {
-  list-style: none;
-  display: flex;
-  flex-direction: row;
-  background-color: darkgray;
-  justify-content: space-evenly;
-  padding: 3px;
-  border-radius: 12px;
+    list-style: none;
+    display: flex;
+    flex-direction: row;
+    background-image: linear-gradient(to left, #0c0b10, #1f2a47);
+    justify-content: space-evenly;
+    padding: 0.7cap;
+    border-radius: 12px;
 }
 
 .menu_cabecera_opcion {
-  background-color: beige;
-  border-radius: 8px;
-  padding: 3px;
+    background-color: beige;
+    border-radius: 8px;
+    padding: 0.5cap;
+    color: black;
 }

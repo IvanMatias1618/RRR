@@ -2,223 +2,289 @@
 //    A: Eliminar recetas  de los insumos que son eliminados.
 //    B: Queda pendiente la consulta de insumo_en_recetas dentro de repositorio.
 // }
-//
-use actix_web::guard::GuardContext;
 
-use crate::actix::buscar_insumo_manejador;
-use crate::actix::crear_insumo_manejador;
-use actix_web::{App, HttpResponse, HttpServer, guard, http, http::Method, web};
-use negocio::AppError;
+// FN_MAIN:  => {
+// RUN: CLI: was the first aproaching on the project. to interact with the backend while his first weeks.
+// RUN: || SERVER: since the main program's goal is be a Server WLAN for an front as web page and Desktop app.
+//}
+use negocio::AppError; //ERRORS: since Rust providess Result we can handle more propialy where and how to manage this errors.
 use std::env;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex; // Rust doesn't provides async main functions by default.
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let argumentos: Vec<String> = env::args().collect();
     if argumentos.len() > 1 && argumentos[1] == "server" {
         println!("Iniciando el servidor Http...");
-        correr_servidor().await?
+        submainfunctions::correr_servidor().await?
     } else {
         println!("Iniciando la linea de comandos.");
-        correr_cli()?;
+        submainfunctions::correr_cli()?;
     }
     Ok(())
 }
 
-async fn correr_servidor() -> Result<(), crate::negocio::AppError> {
-    use crate::repositorio;
-    use crate::servicio;
-    use actix::{
-        buscar_insumo_manejador, crear_insumo_manejador, crear_receta_manejador,
-        editar_insumo_manejador, eliminar_insumo_manejador, valor_de_insumo_manejador,
-        ver_todos_los_insumos_manejador,
-    };
-    use actix_cors::Cors;
-    use actix_web::http;
+// Here we can add more ways to operate this programs.
+// FIRST: We'll need to build an struct from the mod 'repositorio' (repository) for each Table.
+// SECOND: we need to build an service using this repositorory struct.
+// THIRD: use a layer to operate the service.
+pub mod submainfunctions {
+    use actix_web::guard;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
-    //Cargamos de repositorio (inyeccion de dependencias).:
-    let almacen = match repositorio::AlmacenEnMemoria::nuevo("cafeteria") {
-        Ok(almacen) => almacen,
-        Err(e) => {
-            println!(
-                "Error al abrir la base de datos para el almacen\nError: {}",
-                e
-            );
-            return Err(e);
-        }
-    };
-    let recetario = match repositorio::RecetarioEnMemoria::nuevo("cafeteria") {
-        Ok(recetario) => recetario,
-        Err(e) => {
-            println!(
-                "Error al abrir la base de datos para el recetario\nError: {}",
-                e
-            );
-            return Err(e);
-        }
-    };
-    println!("Almacen y Recetario cargados correctamente");
+    // (fn)RUN_SERVER:
+    pub async fn correr_servidor() -> Result<(), crate::negocio::AppError> {
+        use crate::actix::{
+            buscar_insumo_manejador, crear_insumo_manejador, crear_receta_manejador,
+            editar_insumo_manejador, eliminar_insumo_manejador, valor_de_insumo_manejador,
+            ver_todos_los_insumos_manejador,
+        };
+        use crate::repositorio;
+        use crate::servicio;
+        use actix_cors::Cors;
+        use actix_web::{App, HttpResponse, HttpServer, Responder, guard, http, web};
 
-    //Envolvemos almacen en Box para que sea aceptado por Servicio.
-    // Envolvemos en Mutex para permitir la mutabilidad segura.
-    // Envolvemos en Arc para multihilo.
-    let servicio_de_almacen = Arc::new(Mutex::new(servicio::ServicioDeAlmacen::nuevo(Box::new(
-        almacen,
-    ))));
-    let servicio_de_recetas = Arc::new(Mutex::new(servicio::ServicioDeRecetas::nuevo(Box::new(
-        recetario,
-    ))));
+        //Cargamos de repositorio (inyeccion de dependencias).:
+        let almacen = match repositorio::AlmacenEnMemoria::nuevo("cafeteria") {
+            Ok(almacen) => almacen,
+            Err(e) => {
+                println!(
+                    "Error al abrir la base de datos para el almacen\nError: {}",
+                    e
+                );
+                return Err(e);
+            }
+        };
+        let recetario = match repositorio::RecetarioEnMemoria::nuevo("cafeteria") {
+            Ok(recetario) => recetario,
+            Err(e) => {
+                println!(
+                    "Error al abrir la base de datos para el recetario\nError: {}",
+                    e
+                );
+                return Err(e);
+            }
+        };
+        let usuario_repo = match repositorio::UsuariosDb::nuevo("cafeteria") {
+            Ok(repo) => repo,
+            Err(e) => {
+                println!(
+                    "Error al abrir la base de datos para Usuarios\nError: {}",
+                    e
+                );
+                return Err(e);
+            }
+        };
 
-    //Iniciar el server:
+        println!("Almacen, Recetarioy  Usuarios cargados correctamente");
 
-    HttpServer::new(move || {
-        let almacen_info = servicio_de_almacen.clone();
-        let recetas_info = servicio_de_recetas.clone();
+        //Envolvemos almacen en Box para que sea aceptado por Servicio.
+        // Envolvemos en Mutex para permitir la mutabilidad segura.
+        // Envolvemos en Arc para multihilo.
+        let servicio_de_almacen = Arc::new(Mutex::new(servicio::ServicioDeAlmacen::nuevo(
+            Box::new(almacen),
+        )));
+        let servicio_de_recetas = Arc::new(Mutex::new(servicio::ServicioDeRecetas::nuevo(
+            Box::new(recetario),
+        )));
+        let servicio_de_usuarios = Arc::new(Mutex::new(servicio::ServicioDeUsuarios::nuevo(
+            Box::new(usuario_repo),
+        )));
 
-        let cors = Cors::default()
-            .allowed_origin_fn(|_origin, _req_head| true)
-            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
-            .allowed_headers(vec![http::header::CONTENT_TYPE, http::header::ACCEPT])
-            .supports_credentials()
-            .max_age(3600);
+        //Iniciar el server:
 
-        App::new()
-            .wrap(cors)
-            .app_data(web::Data::new(almacen_info))
-            .app_data(web::Data::new(recetas_info))
-            .service(web::resource("/insumos/crear").route(web::post().to(crear_insumo_manejador)))
-            .service(web::resource("/insumos/buscar").route(web::get().to(buscar_insumo_manejador)))
-            .service(
-                web::resource("/insumos/todos")
-                    .route(web::get().to(ver_todos_los_insumos_manejador)),
-            )
-            .service(
-                web::resource("/insumos/valor").route(web::get().to(valor_de_insumo_manejador)),
-            )
-            .service(
-                web::resource("/insumos/editar/{nombre}")
-                    .route(web::put().to(editar_insumo_manejador))
-                    .route(
-                        web::route()
-                            .guard(guard::Method(http::Method::OPTIONS))
-                            .to(|| async { HttpResponse::Ok().finish() }),
-                    ),
-            )
-            .service(
-                web::resource("/insumos/{insumo}")
-                    .route(web::delete().to(eliminar_insumo_manejador)),
-            )
-            .service(web::resource("/recetas/crear").route(web::post().to(crear_receta_manejador)))
-            .service(
-                web::resource("/recetas/todos")
-                    .route(web::get().to(actix::listar_recetas_manejador)),
-            )
-            .service(
-                web::resource("/recetas/buscar")
-                    .route(web::get().to(actix::buscar_receta_manejador)),
-            )
-            .service(
-                web::resource("recetas/valor").route(web::get().to(actix::valor_receta_manejador)),
-            )
-            .service(
-                web::resource("/recetas/editar/{nombre}")
-                    .route(web::put().to(actix::editar_receta_manejador))
-                    .route(
-                        web::route()
-                            .guard(guard::Method(http::Method::OPTIONS))
-                            .to(|| async { HttpResponse::Ok().finish() }),
-                    ),
-            )
-            .service(
-                web::resource("/recetas/{receta}")
-                    .route(web::delete().to(actix::eliminar_receta_manejador)),
-            )
-    })
-    .bind(("127.0.0.1", 8080))?
-    .run()
-    .await?;
-    Ok(())
-}
+        HttpServer::new(move || {
+            let almacen_info = servicio_de_almacen.clone();
+            let recetas_info = servicio_de_recetas.clone();
+            let usuarios_info = servicio_de_usuarios.clone();
 
-fn correr_cli() -> Result<(), crate::negocio::AppError> {
-    use crate::cli;
-    use crate::repositorio;
-    use crate::servicio;
+            let cors = Cors::default()
+                .allowed_origin_fn(|_origin, _req_head| true)
+                .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+                .allowed_headers(vec![http::header::CONTENT_TYPE, http::header::ACCEPT])
+                .supports_credentials()
+                .max_age(3600);
 
-    let mut almacen = match repositorio::AlmacenEnMemoria::nuevo("cafeteria") {
-        Ok(almacen) => almacen,
-        Err(e) => {
-            println!("Error al abrir la base de datos porque: {}", e);
-            return Err(e);
-        }
-    };
+            App::new()
+                .wrap(cors)
+                .app_data(web::Data::new(almacen_info))
+                .app_data(web::Data::new(recetas_info))
+                .app_data(web::Data::new(usuarios_info))
+                .service(
+                    web::scope("")
+                        .service(
+                            web::resource("/insumos/buscar")
+                                .route(web::get().to(buscar_insumo_manejador)),
+                        )
+                        .service(
+                            web::resource("/insumos/todos")
+                                .route(web::get().to(ver_todos_los_insumos_manejador)),
+                        )
+                        .service(
+                            web::resource("/insumos/valor")
+                                .route(web::get().to(valor_de_insumo_manejador)),
+                        )
+                        .service(
+                            web::resource("/recetas/todos")
+                                .route(web::get().to(crate::actix::listar_recetas_manejador)),
+                        )
+                        .service(
+                            web::resource("/recetas/buscar")
+                                .route(web::get().to(crate::actix::buscar_receta_manejador)),
+                        )
+                        .service(
+                            web::resource("/recetas/valor")
+                                .route(web::get().to(crate::actix::valor_receta_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/todos")
+                                .route(web::get().to(crate::actix::listar_usuarios_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/buscar")
+                                .route(web::get().to(crate::actix::buscar_usuario_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/valor")
+                                .route(web::get().to(crate::actix::valor_de_usuario_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/iniciar_sesion")
+                                .route(web::post().to(crate::actix::iniciar_sesion_manejador)),
+                        ),
+                )
+                .service(
+                    web::scope("")
+                        .wrap(crate::actix::middleware::GuardianDeAcceso) //ACTIVAMOS MIDDLEWARE
+                        .service(
+                            web::resource("/insumos/editar/{nombre}")
+                                .route(web::put().to(editar_insumo_manejador))
+                                .route(
+                                    web::route()
+                                        .guard(guard::Method(http::Method::OPTIONS))
+                                        .to(|| async { HttpResponse::Ok().finish() }),
+                                ),
+                        )
+                        .service(
+                            web::resource("/insumos/{insumo}")
+                                .route(web::delete().to(eliminar_insumo_manejador)),
+                        )
+                        .service(
+                            web::resource("/insumos/crear")
+                                .route(web::post().to(crear_insumo_manejador)),
+                        )
+                        .service(
+                            web::resource("/recetas/crear")
+                                .route(web::post().to(crear_receta_manejador)),
+                        )
+                        .service(
+                            web::resource("/recetas/editar/{nombre}")
+                                .route(web::put().to(crate::actix::editar_receta_manejador))
+                                .route(
+                                    web::route()
+                                        .guard(guard::Method(http::Method::OPTIONS))
+                                        .to(|| async { HttpResponse::Ok().finish() }),
+                                ),
+                        )
+                        .service(
+                            web::resource("/recetas/{receta}")
+                                .route(web::delete().to(crate::actix::eliminar_receta_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/crear")
+                                .route(web::post().to(crate::actix::crear_usuario_manejador)),
+                        )
+                        .service(
+                            web::resource("/usuarios/{usuario}")
+                                .route(web::delete().to(crate::actix::eliminar_usuario_manejador)),
+                        ),
+                )
+        })
+        .bind(("127.0.0.1", 8080))?
+        .run()
+        .await?;
+        Ok(())
+    }
 
-    let mut recetario = match repositorio::RecetarioEnMemoria::nuevo("cafeteria") {
-        Ok(recetario) => recetario,
-        Err(e) => {
-            println!("Error al abrir la base de datos con el recetario: {}", e);
-            return Err(e);
-        }
-    };
+    pub fn correr_cli() -> Result<(), crate::negocio::AppError> {
+        use crate::repositorio;
+        use crate::servicio;
 
-    println!("almacen cargado");
-    let mut servicio_de_almacen = servicio::ServicioDeAlmacen::nuevo(Box::new(almacen));
-    let mut servicio_de_recetas = servicio::ServicioDeRecetas::nuevo(Box::new(recetario));
+        let almacen = match repositorio::AlmacenEnMemoria::nuevo("cafeteria") {
+            Ok(almacen) => almacen,
+            Err(e) => {
+                println!("Error al abrir la base de datos porque: {}", e);
+                return Err(e);
+            }
+        };
 
-    println!(
-        "Hola :) \n Bienvenid@ a tu siste de Inventario demo: 1
+        let recetario = match repositorio::RecetarioEnMemoria::nuevo("cafeteria") {
+            Ok(recetario) => recetario,
+            Err(e) => {
+                println!("Error al abrir la base de datos con el recetario: {}", e);
+                return Err(e);
+            }
+        };
+
+        println!("almacen cargado");
+        let mut servicio_de_almacen = servicio::ServicioDeAlmacen::nuevo(Box::new(almacen));
+        let mut servicio_de_recetas = servicio::ServicioDeRecetas::nuevo(Box::new(recetario));
+
+        println!(
+            "Hola :) \n Bienvenid@ a tu siste de Inventario demo: 1
              \nYa se ha creado el servicio de almacen y recetas."
-    );
+        );
 
-    //Creamos una funcion predeterminada que permita al usuario
-    fn reintentar_o_salir<F>(mut funcion: F) -> ()
-    where
-        F: FnMut() -> bool,
-    {
-        loop {
-            if funcion() {
+        //Creamos una funcion predeterminada que permita al usuario
+        fn reintentar_o_salir<F>(mut funcion: F) -> ()
+        where
+            F: FnMut() -> bool,
+        {
+            loop {
+                if funcion() {
+                    break;
+                }
+                if super::cli::reintentar() {
+                    continue;
+                }
                 break;
             }
-            if cli::reintentar() {
-                continue;
-            }
-            break;
         }
-    }
 
-    loop {
-        let res = cli::menu();
-        match res {
-            1 => break,
-            2 => reintentar_o_salir(|| cli::crear_insumo(&mut servicio_de_almacen)),
-            3 => reintentar_o_salir(|| {
-                cli::crear_receta(&mut servicio_de_recetas, &servicio_de_almacen)
-            }),
-            4 => reintentar_o_salir(|| cli::buscar_insumo(&servicio_de_almacen)),
-            5 => reintentar_o_salir(|| cli::buscar_receta(&servicio_de_recetas)),
-            6 => cli::ver_insumos(&servicio_de_almacen),
-            7 => cli::ver_recetas(&servicio_de_recetas),
-            8 => reintentar_o_salir(|| cli::valor_de_insumo(&servicio_de_almacen)),
-            9 => {
-                reintentar_o_salir(|| cli::receta_valor(&servicio_de_recetas, &servicio_de_almacen))
+        loop {
+            let res = super::cli::menu();
+            match res {
+                1 => break,
+                2 => reintentar_o_salir(|| super::cli::crear_insumo(&mut servicio_de_almacen)),
+                3 => reintentar_o_salir(|| {
+                    super::cli::crear_receta(&mut servicio_de_recetas, &servicio_de_almacen)
+                }),
+                4 => reintentar_o_salir(|| super::cli::buscar_insumo(&servicio_de_almacen)),
+                5 => reintentar_o_salir(|| super::cli::buscar_receta(&servicio_de_recetas)),
+                6 => super::cli::ver_insumos(&servicio_de_almacen),
+                7 => super::cli::ver_recetas(&servicio_de_recetas),
+                8 => reintentar_o_salir(|| super::cli::valor_de_insumo(&servicio_de_almacen)),
+                9 => reintentar_o_salir(|| {
+                    super::cli::receta_valor(&servicio_de_recetas, &servicio_de_almacen)
+                }),
+                10 => reintentar_o_salir(|| super::cli::eliminar_insumo(&mut servicio_de_almacen)),
+                11 => reintentar_o_salir(|| super::cli::eliminar_receta(&mut servicio_de_recetas)),
+                12 => reintentar_o_salir(|| {
+                    super::cli::producir_receta(&mut servicio_de_almacen, &servicio_de_recetas)
+                }),
+                13 => reintentar_o_salir(|| {
+                    super::cli::ingredientes_en_recetas(&servicio_de_recetas, &servicio_de_almacen)
+                }),
+                14 => reintentar_o_salir(|| super::cli::editar_insumo(&mut servicio_de_almacen)),
+                15 => reintentar_o_salir(|| {
+                    super::cli::editar_receta(&mut servicio_de_recetas, &servicio_de_almacen)
+                }),
+                _ => continue,
             }
-            10 => reintentar_o_salir(|| cli::eliminar_insumo(&mut servicio_de_almacen)),
-            11 => reintentar_o_salir(|| cli::eliminar_receta(&mut servicio_de_recetas)),
-            12 => reintentar_o_salir(|| {
-                cli::producir_receta(&mut servicio_de_almacen, &servicio_de_recetas)
-            }),
-            13 => reintentar_o_salir(|| {
-                cli::ingredientes_en_recetas(&servicio_de_recetas, &servicio_de_almacen)
-            }),
-            14 => reintentar_o_salir(|| cli::editar_insumo(&mut servicio_de_almacen)),
-            15 => reintentar_o_salir(|| {
-                cli::editar_receta(&mut servicio_de_recetas, &servicio_de_almacen)
-            }),
-            _ => continue,
         }
+        return Ok(());
     }
-    return Ok(());
 }
 
 pub mod cli {
@@ -590,12 +656,260 @@ pub mod cli {
 
 pub mod actix {
     use crate::comandos;
-    use crate::negocio::AppError;
-    use crate::servicio::{ServicioDeAlmacen, ServicioDeRecetas};
+    use crate::servicio::{ServicioDeAlmacen, ServicioDeRecetas, ServicioDeUsuarios};
     use actix_web::{HttpResponse, Responder, web};
     use serde::{Deserialize, Serialize};
+    use std::fmt::Debug;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    pub mod middleware {
+
+        use crate::negocio::{Acciones, Entidad};
+        use actix_service::{Service, Transform};
+        use actix_web::{
+            Error, HttpResponse,
+            body::EitherBody,
+            dev::{ServiceRequest, ServiceResponse},
+        };
+        use futures::future::{LocalBoxFuture, Ready, ok};
+        use std::{
+            pin::Pin,
+            rc::Rc,
+            task::{Context, Poll},
+        };
+
+        pub struct GuardianDeAcceso;
+
+        impl<S, B> Transform<S, ServiceRequest> for GuardianDeAcceso
+        where
+            S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+            B: 'static,
+        {
+            type Response = ServiceResponse<EitherBody<B>>;
+            type Error = Error;
+            type InitError = ();
+            type Transform = GuardianMiddleware<S>;
+            type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+            fn new_transform(&self, service: S) -> Self::Future {
+                ok(GuardianMiddleware {
+                    service: Rc::new(service),
+                })
+            }
+        }
+
+        pub struct GuardianMiddleware<S> {
+            service: Rc<S>,
+        }
+
+        impl<S, B> Service<ServiceRequest> for GuardianMiddleware<S>
+        where
+            S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+            B: 'static,
+        {
+            type Response = ServiceResponse<EitherBody<B>>;
+            type Error = Error;
+            type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                self.service.poll_ready(cx)
+            }
+
+            fn call(&self, req: ServiceRequest) -> Self::Future {
+                let svc = Rc::clone(&self.service);
+                let path = req.path().to_string();
+                let token = req
+                    .headers()
+                    .get("Authorization")
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+
+                Box::pin(async move {
+                    match crate::actix::middleware::verificar_permiso(&path, &token) {
+                        Ok(_) => {
+                            // Respuesta exitosa mapeada al Left de EitherBody
+                            let res: ServiceResponse<B> = svc.call(req).await?;
+                            Ok(res.map_into_left_body())
+                        }
+                        Err(e) => {
+                            // Error convertido al Right de EitherBody
+                            let res = req.into_response(HttpResponse::Forbidden().body(e));
+                            Ok(res.map_into_right_body())
+                        }
+                    }
+                })
+            }
+        }
+
+        fn parsear_ruta(ruta: &str) -> Result<(Entidad, Acciones), String> {
+            let partes: Vec<&str> = ruta.trim_start_matches('/').split('/').collect();
+
+            if partes.len() != 2 {
+                return Err("Ruta inválida: se esperaba /entidad/accion".to_string());
+            }
+
+            let entidad = match partes[0] {
+                "receta" => Entidad::Receta,
+                "insumo" => Entidad::Insumo,
+                "usuario" => Entidad::Usuario,
+                _ => return Err(format!("Entidad desconocida: {}", partes[0])),
+            };
+
+            let accion = match partes[1] {
+                "crear" => Acciones::Crear,
+                "editar" => Acciones::Editar,
+                "eliminar" => Acciones::Eliminar,
+                _ => return Err(format!("Acción desconocida: {}", partes[1])),
+            };
+
+            Ok((entidad, accion))
+        }
+
+        pub fn verificar_permiso(ruta: &str, token: &str) -> Result<(), String> {
+            let (entidad, accion) = parsear_ruta(ruta)?;
+            let rol = match crate::negocio::verificar_token(token) {
+                Ok(r) => r,
+                Err(e) => return Err(format!("Acceso denegado: {}", e)),
+            };
+
+            if crate::negocio::puede_operar(entidad, rol, accion) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "El rol {:?} no tiene permiso para realizar {:?} sobre {:?}",
+                    rol, accion, entidad
+                ))
+            }
+        }
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct CrearUsuarioPeticion {
+        pub nombre: String,
+        pub rol: String,
+        pub contra: String,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    pub struct VerificarUsuario {
+        nombre: String,
+        contra: String,
+    }
+
+    pub async fn crear_usuario_manejador(
+        app_info_repositorio: web::Data<std::sync::Arc<tokio::sync::Mutex<ServicioDeUsuarios>>>,
+        peticion: web::Json<CrearUsuarioPeticion>,
+    ) -> impl Responder {
+        println!(
+            "nombre:  {}, rol: {}, admin: {}",
+            peticion.nombre, peticion.rol, peticion.contra
+        );
+        let mut repositorio = app_info_repositorio.lock().await;
+        match comandos::crear_usuario(
+            (&peticion.nombre, &peticion.contra, &peticion.rol),
+            &mut repositorio,
+        ) {
+            Ok(_) => HttpResponse::Ok().json(MensajeRespuesta {
+                mensaje: format!("usuario: {}, creado exitosamente", peticion.nombre),
+            }),
+            Err(e) => {
+                println!("{}: 652", e);
+                return HttpResponse::InternalServerError().json(MensajeRespuesta {
+                    mensaje: format!("Error al crear usuario: {}", e),
+                });
+            }
+        }
+    }
+
+    pub async fn iniciar_sesion_manejador(
+        app_info_repositorio: web::Data<std::sync::Arc<tokio::sync::Mutex<ServicioDeUsuarios>>>,
+        query: web::Json<VerificarUsuario>,
+    ) -> impl Responder {
+        let mut repo = app_info_repositorio.lock().await;
+        match comandos::iniciar_sesion(&mut repo, &query.nombre, &query.contra) {
+            Ok(token) => HttpResponse::Ok().json(token),
+            Err(e) => HttpResponse::BadRequest().json(MensajeRespuesta {
+                mensaje: format!("Error de validacion, {}", e),
+            }),
+        }
+    }
+
+    pub async fn buscar_usuario_manejador(
+        app_info_repositorio: web::Data<std::sync::Arc<tokio::sync::Mutex<ServicioDeUsuarios>>>,
+        query: web::Query<ParametrosConsulta>,
+    ) -> impl Responder {
+        let nombre_usuario = match &query.consulta {
+            Some(nombre) => nombre.clone(),
+            None => {
+                return HttpResponse::BadRequest().json(MensajeRespuesta {
+                    mensaje: "Falta el parametro de busqueda".to_string(),
+                });
+            }
+        };
+        let repositorio = app_info_repositorio.lock().await;
+        return match comandos::buscar_usuario(&repositorio, &nombre_usuario) {
+            Ok(usuarios) => HttpResponse::Ok().json(usuarios),
+            Err(e) => HttpResponse::BadRequest().json(MensajeRespuesta {
+                mensaje: format!("Error al listar los usarios: {}", e),
+            }),
+        };
+    }
+
+    pub async fn listar_usuarios_manejador(
+        app_info_repositorio: web::Data<Arc<Mutex<ServicioDeUsuarios>>>,
+    ) -> impl Responder {
+        let repo = app_info_repositorio.lock().await;
+        return match comandos::listar_usuarios(&repo) {
+            Ok(resultados) => HttpResponse::Ok().json(resultados),
+            Err(e) => HttpResponse::BadRequest().json(MensajeRespuesta {
+                mensaje: format!("Error al listar los usuarios: {}", e),
+            }),
+        };
+    }
+
+    pub async fn valor_de_usuario_manejador(
+        app_info_repositorio: web::Data<Arc<Mutex<ServicioDeUsuarios>>>,
+        query: web::Query<ParametrosConsulta>,
+    ) -> impl Responder {
+        let nombre = match &query.consulta {
+            Some(nombre) => nombre.clone(),
+            None => {
+                return HttpResponse::BadRequest().json(MensajeRespuesta {
+                    mensaje: "Falta el parametro 'consulta' ".to_string(),
+                });
+            }
+        };
+        let repo = app_info_repositorio.lock().await;
+        match comandos::valor_de_usuario(&repo, &nombre) {
+            Ok((id, nombre, rol)) => HttpResponse::Ok().json(serde_json::json!({
+                "id": id,
+                "nombre": nombre,
+                "rol": rol,
+            })),
+            Err(e) => HttpResponse::NotFound().json(MensajeRespuesta {
+                mensaje: format!("No se encontro el usuario '{}', \nError: '{}'", nombre, e),
+            }),
+        }
+    }
+
+    pub async fn eliminar_usuario_manejador(
+        app_info_repositorio: web::Data<Arc<Mutex<ServicioDeUsuarios>>>,
+        ruta: web::Path<String>,
+    ) -> impl Responder {
+        let nombre_insumo = ruta.into_inner();
+        let mut repo = app_info_repositorio.lock().await;
+
+        match comandos::eliminar_usuario(&mut repo, &nombre_insumo) {
+            Ok(_) => HttpResponse::Ok().json(MensajeRespuesta {
+                mensaje: format!("Insumo '{}' eliminado correctamente.", nombre_insumo),
+            }),
+            Err(e) => HttpResponse::InternalServerError().json(MensajeRespuesta {
+                mensaje: format!("Error al eliminar el insumo '{}': {}", nombre_insumo, e),
+            }),
+        }
+    }
 
     #[derive(Deserialize)]
     pub struct DatosReceta {
@@ -626,12 +940,10 @@ pub mod actix {
     pub struct MensajeRespuesta {
         pub mensaje: String,
     }
-
     pub fn extraer_nombre_insumo(
         ruta: Option<web::Path<String>>,
         query: Option<web::Query<ParametrosConsulta>>,
     ) -> Option<String> {
-        println!("Buenas noches");
         if let Some(consulta) = query {
             consulta.consulta.clone()
         } else if let Some(ruta_valor) = ruta {
@@ -645,7 +957,6 @@ pub mod actix {
         app_info_almacen: web::Data<std::sync::Arc<tokio::sync::Mutex<ServicioDeAlmacen>>>,
         peticion: web::Json<CrearInsumoPeticion>,
     ) -> impl Responder {
-        println!("Hola Cati.");
         let mut almacen = app_info_almacen.lock().await;
         match almacen.añadir(
             peticion.nombre.clone(),
@@ -666,7 +977,6 @@ pub mod actix {
         app_info_almacen: web::Data<std::sync::Arc<tokio::sync::Mutex<ServicioDeAlmacen>>>,
         query: web::Query<ParametrosConsulta>,
     ) -> impl Responder {
-        println!("Gracias por tu atencion");
         let nombre_insumo = match &query.consulta {
             Some(nombre) => nombre.clone(),
             None => {
@@ -675,7 +985,7 @@ pub mod actix {
                 });
             }
         };
-        let mut almacen = app_info_almacen.lock().await;
+        let almacen = app_info_almacen.lock().await;
         match almacen.buscar(&nombre_insumo) {
             Ok(resultados) => {
                 if resultados.is_empty() {
@@ -708,7 +1018,6 @@ pub mod actix {
         app_info_almacen: web::Data<Arc<Mutex<ServicioDeAlmacen>>>,
         query: web::Query<ParametrosConsulta>,
     ) -> impl Responder {
-        println!("Que tengas dulces sueños");
         let nombre = match &query.consulta {
             Some(nombre) => nombre.clone(),
             None => {
@@ -773,7 +1082,6 @@ pub mod actix {
         app_info_almacen: web::Data<Arc<Mutex<ServicioDeAlmacen>>>,
         ruta: web::Path<String>,
     ) -> impl Responder {
-        println!("Y recuerda, los pinguinos son reales");
         let nombre_insumo = ruta.into_inner();
         let mut almacen = app_info_almacen.lock().await;
 
@@ -837,7 +1145,7 @@ pub mod actix {
                 });
             }
         };
-        let mut libro = app_info_libro.lock().await;
+        let libro = app_info_libro.lock().await;
         let resultados = comandos::buscar_receta(&libro, &nombre);
         HttpResponse::Ok().json(resultados)
     }
@@ -883,7 +1191,7 @@ pub mod actix {
 
         //Aqui puse el dereferenciador '*' porque me decia que se estaban recibiendo GaurMutex.
         //
-        let mut almacen = app_info_almacen.lock().await;
+        let almacen = app_info_almacen.lock().await;
         let mut libro = app_info_libro.lock().await;
         let servicio: &mut ServicioDeRecetas = &mut *libro;
         match comandos::editar_receta(servicio, &nombre, body.nombre, body.ingredientes, &almacen) {
@@ -930,7 +1238,85 @@ pub mod actix {
 
 pub mod comandos {
     use crate::negocio::{AppError, AppResult};
-    use crate::servicio::{ServicioDeAlmacen, ServicioDeRecetas};
+    use crate::servicio::{ServicioDeAlmacen, ServicioDeRecetas, ServicioDeUsuarios};
+
+    pub fn crear_usuario(
+        usuario: (&str, &str, &str),
+        repositorio: &mut ServicioDeUsuarios,
+    ) -> AppResult<String> {
+        return match repositorio.agregar(
+            usuario.0.to_string(),
+            usuario.1.to_string(),
+            usuario.2.to_string(),
+        ) {
+            Ok(_) => Ok(format!("Se ha creado el usuario: {}", usuario.0)),
+            Err(e) => {
+                println!("{}1074", e);
+                return Err(AppError::ErrorPersonal(format!(
+                    "Error al crear el usuario: {}\n Error {}",
+                    usuario.0, e
+                )));
+            }
+        };
+    }
+
+    pub fn iniciar_sesion(
+        repositorio: &mut ServicioDeUsuarios,
+        usuario: &str,
+        contra: &str,
+    ) -> AppResult<String> {
+        return match repositorio.verificar_usuario(contra, usuario) {
+            Ok(token) => Ok(token),
+            Err(_) => Err(AppError::DatoInvalido(format!(
+                "Querid@: {}, contra incorrecta, por favor vuelve a intentar.",
+                usuario
+            ))),
+        };
+    }
+
+    pub fn buscar_usuario(
+        repositorio: &ServicioDeUsuarios,
+        busqueda: &String,
+    ) -> AppResult<Vec<String>> {
+        return match repositorio.buscar(busqueda) {
+            Ok(resultados) => Ok(resultados),
+            Err(e) => Err(AppError::DatoInvalido(format!(
+                "No se encontro el usuario: {}\nError: {}",
+                busqueda, e
+            ))),
+        };
+    }
+
+    pub fn listar_usuarios(repositorio: &ServicioDeUsuarios) -> AppResult<Vec<String>> {
+        return match repositorio.listar() {
+            Ok(resultados) => Ok(resultados),
+            Err(e) => Err(AppError::ErrorPersonal(format!(
+                "Ocurrio un error al listar los usuarios: {}",
+                e
+            ))),
+        };
+    }
+
+    pub fn valor_de_usuario(
+        repo: &ServicioDeUsuarios,
+        usuario: &str,
+    ) -> AppResult<(String, String, String)> {
+        return match repo.obtener(usuario) {
+            Ok((id, nombre, rol)) => Ok((id, nombre, rol)),
+            Err(e) => Err(AppError::ErrorPersonal(format!(
+                "Error al encontrar el usuario: {}, error: {}",
+                usuario, e
+            ))),
+        };
+    }
+
+    pub fn eliminar_usuario(
+        repositorio: &mut ServicioDeUsuarios,
+        busqueda: &String,
+    ) -> AppResult<()> {
+        repositorio.eliminar(busqueda)?;
+        Ok(())
+    }
 
     pub fn crear_insumo(
         insumo: (String, u32, u32, u32),
@@ -1076,15 +1462,12 @@ pub mod comandos {
         insumo: &String,
     ) -> AppResult<Vec<String>> {
         almacen.existe(insumo)?;
-        let id = almacen.obtener_id_con_nombre(insumo)?;
+        almacen.obtener_id_con_nombre(insumo)?;
         return libro.insumo_en_recetas(insumo);
     }
 }
 
 pub mod auxiliares {
-    //1
-    use crate::negocio;
-    use crate::servicio;
     use std::io;
 
     pub fn solicitar_texto() -> String {
@@ -1133,10 +1516,12 @@ pub mod auxiliares {
 }
 
 pub mod negocio {
+    use bcrypt::hash;
+
     //Esta capa del programa se encargara de la virtualizacion de entidades en memoria y
     //su gestion bajo las reglas logicas del negocio.
     //
-    use chrono::{DateTime, TimeZone};
+    use chrono::DateTime;
     use serde::{Deserialize, Serialize};
     //Esto de acá es para la fecha.
     use actix_web;
@@ -1407,7 +1792,9 @@ pub mod negocio {
                     "La lista de ingredientes esta vacia".to_string(),
                 ));
             }
+
             self.ingredientes = ingredientes;
+
             Ok(())
         }
     }
@@ -1536,7 +1923,7 @@ pub mod negocio {
             self.proveedor_id.clone()
         }
 
-        pub fn gasto_pesos(&self) -> String {
+        pub fn gasto_pesos(&self) -> f64 {
             self.gasto_pesos.clone()
         }
     }
@@ -1550,15 +1937,73 @@ pub mod negocio {
         empleado: Uuid,
     }
 
-    pub struct Empleado {
-        id: Uuid,
+    #[derive(Hash, Eq, PartialEq, Debug, Copy, Clone)]
+    pub enum Entidad {
+        Insumo,
+        Receta,
+        Usuario,
+    }
+
+    #[derive(Hash, Eq, PartialEq, Debug, Copy, Clone)]
+    pub enum Acciones {
+        Crear,
+        Eliminar,
+        Editar,
+    }
+
+    #[derive(Hash, Eq, PartialEq, Debug, Copy, Clone)]
+    pub enum Rol {
+        Admin,
+        Invitado,
+        Usuario,
+    }
+
+    fn listar_permisos() -> HashMap<Entidad, HashMap<Rol, Vec<Acciones>>> {
+        let mut permisos = HashMap::new();
+        let mut receta_permisos = HashMap::new();
+        receta_permisos.insert(
+            Rol::Admin,
+            vec![Acciones::Crear, Acciones::Editar, Acciones::Eliminar],
+        );
+        receta_permisos.insert(Rol::Usuario, vec![Acciones::Crear, Acciones::Editar]);
+        permisos.insert(Entidad::Receta, receta_permisos);
+        let mut permisos_insumos = HashMap::new();
+        permisos_insumos.insert(
+            Rol::Admin,
+            vec![Acciones::Crear, Acciones::Editar, Acciones::Eliminar],
+        );
+        permisos_insumos.insert(Rol::Usuario, vec![Acciones::Crear, Acciones::Editar]);
+        permisos.insert(Entidad::Insumo, permisos_insumos);
+        let mut permisos_usuarios = HashMap::new();
+        permisos_usuarios.insert(
+            Rol::Admin,
+            vec![Acciones::Crear, Acciones::Editar, Acciones::Eliminar],
+        );
+        permisos
+    }
+
+    pub fn puede_operar(entidad: Entidad, rol: Rol, accion: Acciones) -> bool {
+        PERMISOS
+            .get(&entidad)
+            .and_then(|roles| roles.get(&rol))
+            .map_or(false, |acciones| acciones.contains(&accion))
+    }
+
+    use once_cell::sync::Lazy;
+    use std::collections::HashMap;
+
+    pub static PERMISOS: Lazy<HashMap<Entidad, HashMap<Rol, Vec<Acciones>>>> =
+        Lazy::new(|| listar_permisos());
+
+    pub struct Usuario {
+        id: String,
         nombre: String,
-        contra_hash: String,
+        contra_token: String,
         rol: String,
     }
 
-    impl Empleado {
-        pub fn nuevo(nombre: &String, rol: String, psswd: &str) -> AppResult<Empleado> {
+    impl Usuario {
+        pub fn nuevo(nombre: &String, rol: String, psswd: &str) -> AppResult<Usuario> {
             if nombre.is_empty() {
                 return Err(AppError::DatoInvalido(
                     "el nombre no puede estar vacio".to_string(),
@@ -1568,18 +2013,87 @@ pub mod negocio {
                 return Err(AppError::DatoInvalido("El rol esta vacio".to_string()));
             }
 
-            use bcrypt::hash;
             let contraseña = hash(psswd, 12).expect("Error al encriptar la contraseña");
-            Ok(Empleado {
-                id: Uuid::new_v4(),
+            Ok(Usuario {
+                id: Uuid::new_v4().to_string(),
                 nombre: nombre.clone(),
-                contra_hash: contraseña,
+                contra_token: contraseña,
                 rol,
             })
         }
+
+        pub fn crear_desde_db(
+            id: String,
+            nombre: String,
+            contra_token: String,
+            rol: String,
+        ) -> Usuario {
+            Usuario {
+                id,
+                nombre,
+                contra_token,
+                rol,
+            }
+        }
+        pub fn obtener_id(&self) -> String {
+            self.id.clone()
+        }
+
+        pub fn obtener_nombre(&self) -> String {
+            self.nombre.clone()
+        }
+
+        pub fn obtener_hash(&self) -> String {
+            self.contra_token.clone()
+        }
+
+        pub fn obtener_rol(&self) -> String {
+            self.rol.clone()
+        }
+
+        pub fn verificar_hash(&self, contra: &str) -> AppResult<String> {
+            match bcrypt::verify(contra, &self.contra_token) {
+                Ok(true) => Ok(self.generar_token()),
+                Ok(false) => Err(AppError::DatoInvalido("Contraseña incorrecta.".to_string())),
+                Err(e) => Err(AppError::DatoInvalido(format!(
+                    "Error al verificar hash: {}",
+                    e
+                ))),
+            }
+        }
+
+        pub fn generar_token(&self) -> String {
+            let nombre = self.nombre.chars().take(2);
+            let rol = self.rol.chars().take(2);
+            let id = self.id.chars().take(2);
+            let hash = self.contra_token.chars().take(2);
+
+            let mut token = String::new();
+
+            for c in nombre.chain(rol).chain(id).chain(hash) {
+                token.push(c);
+            }
+
+            token
+        }
+    }
+
+    pub fn verificar_token(token: &str) -> Result<Rol, String> {
+        if token.len() != 8 {
+            return Err("Token inválido: longitud incorrecta".to_string());
+        }
+
+        let rol_str = &token[2..4];
+
+        let rol = match rol_str {
+            "ad" => Rol::Admin,
+            "us" => Rol::Usuario,
+            "in" => Rol::Invitado,
+            _ => return Err("Rol desconocido en el token".to_string()),
+        };
+        Ok(rol)
     }
 }
-
 pub mod repositorio {
 
     //REPOSITORIO: Aqui se desglosa la logica para la persistencia de datos.
@@ -2022,7 +2536,7 @@ pub mod repositorio {
         fn crear(&mut self, entidad: T) -> AppResult<()>;
     }
 
-    pub trait BaseDatos<T> {
+    pub trait BaseDatos<T>: Send + Sync {
         fn crear(&mut self, entidad: T) -> AppResult<()>;
         fn editar(&mut self, entidad: T) -> AppResult<()>;
         fn eliminar(&self, entidad_id: &str) -> AppResult<()>;
@@ -2032,11 +2546,166 @@ pub mod repositorio {
         fn nombre_con_id(&self, id: &str) -> AppResult<String>;
     }
 
-    pub struct GastoDB {
+    pub struct UsuariosDb {
         conexion: Arc<Mutex<Connection>>,
     }
 
-    impl GastoDB {
+    impl UsuariosDb {
+        pub fn nuevo(ruta: &str) -> AppResult<UsuariosDb> {
+            let conexion = Connection::open(ruta)?;
+            conexion.execute(
+                "CREATE TABLE IF NOT EXISTS usuarios (
+                    id TEXT NOT NULL,
+                    nombre TEXT NOT NULL,
+                    hash TEXT NOT NULL,
+                    rol TEXT NOT NULL
+                    
+                )",
+                [],
+            )?;
+            Ok(UsuariosDb {
+                conexion: Arc::new(Mutex::new(conexion)),
+            })
+        }
+    }
+
+    impl BaseDatos<negocio::Usuario> for UsuariosDb {
+        fn crear(&mut self, datos: negocio::Usuario) -> AppResult<()> {
+            let con = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion: {}", e))
+            })?;
+            con.execute(
+                "INSERT INTO usuarios (id, nombre, hash, rol)
+                VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    datos.obtener_id(),
+                    datos.obtener_nombre(),
+                    datos.obtener_hash(),
+                    datos.obtener_rol()
+                ],
+            )?;
+            Ok(())
+        }
+        fn editar(&mut self, datos: negocio::Usuario) -> AppResult<()> {
+            let con = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion {}", e))
+            })?;
+            let afectados = con.execute(
+                "UPDATE usuarios SET nombre = ?1, hash = ?2, rol =?3 WHERE id = ?4",
+                params![
+                    datos.obtener_nombre(),
+                    datos.obtener_hash(),
+                    datos.obtener_rol(),
+                    datos.obtener_id()
+                ],
+            )?;
+            if afectados == 0 {
+                return Err(AppError::ErrorPersonal(format!(
+                    "No se guardaron los cambios en: {}",
+                    datos.obtener_nombre()
+                )));
+            }
+            Ok(())
+        }
+
+        fn eliminar(&self, nombre: &str) -> AppResult<()> {
+            let id = self.id_con_nombre(nombre)?;
+            let con = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion:{}", e))
+            })?;
+            let funciono = con.execute("DELETE FROM usuarios WHERE id =?", params![id])?;
+            if funciono == 0 {
+                return Err(AppError::ErrorPersonal(format!(
+                    "El Usuario: {}\n no fue modificado.",
+                    nombre
+                )));
+            }
+            Ok(())
+        }
+
+        fn id_con_nombre(&self, nombre: &str) -> AppResult<String> {
+            let conexion_segura = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion: {}", e))
+            })?;
+            let id: String = conexion_segura
+                .query_row(
+                    "SELECT id FROM usuarios WHERE nombre = ?",
+                    params![nombre],
+                    |fila| fila.get(0),
+                )
+                .map_err(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => AppError::DatoInvalido(format!(
+                        "En obtener id: No se encontro el usuario : {}",
+                        nombre
+                    )),
+                    _ => AppError::DbError(e),
+                })?;
+            Ok(id)
+        }
+
+        fn nombre_con_id(&self, id: &str) -> AppResult<String> {
+            let conexion_segura = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion: {}", e))
+            })?;
+            let nombre = conexion_segura
+                .query_row(
+                    "SELECT nombre FROM usuarios WHERE id = ?",
+                    params![id],
+                    |fila| fila.get(0),
+                )
+                .map_err(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => {
+                        AppError::DatoInvalido(format!("No se encontro el usuario con id: {}", id))
+                    }
+                    _ => AppError::DbError(e),
+                })?;
+            Ok(nombre)
+        }
+
+        fn obtener(&self, busqueda: &str) -> AppResult<negocio::Usuario> {
+            let id = self.id_con_nombre(busqueda)?;
+            let con = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("Error al bloquear la conexion: {}", e))
+            })?;
+            con.query_row(
+                "SELECT id, nombre, hash, rol FROM usuarios WHERE id = ?",
+                params![id],
+                |fila| {
+                    Ok(negocio::Usuario::crear_desde_db(
+                        fila.get(0)?,
+                        fila.get(1)?,
+                        fila.get(2)?,
+                        fila.get(3)?,
+                    ))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::DatoInvalido(format!("usuario: {}, no existe", busqueda))
+                }
+                _ => AppError::DbError(e),
+            })
+        }
+
+        fn listar(&self) -> AppResult<Vec<String>> {
+            let con = self.conexion.lock().map_err(|e| {
+                AppError::ErrorPersonal(format!("error al bloquear la conexion: {}", e))
+            })?;
+            let mut accion = con.prepare("SELECT nombre FROM usuarios ORDER BY nombre")?;
+            let nombres_iter = accion.query_map([], |fila| fila.get(0))?;
+            let mut nombres = Vec::new();
+            for nombre in nombres_iter {
+                nombres.push(nombre?);
+            }
+            Ok(nombres)
+        }
+    }
+
+    pub struct GastosDB {
+        conexion: Arc<Mutex<Connection>>,
+    }
+
+    impl GastosDB {
         pub fn nuevo(ruta: &str) -> AppResult<GastosDB> {
             let conexion = Connection::open(ruta)?;
             conexion.execute(
@@ -2048,8 +2717,7 @@ pub mod repositorio {
                     PRIMARY KEY (insumo_id),
                     PRIMARY KEY (proveedor_id),
                     FOREIGN KEY (insumo_id) REFERENCES insumos(id) ON DELETE CASCADE,
-                    FOREIGN KEY (producto_id) REFERENCES proveedores(id) ON DELETE CASCADE
-                    
+                    FOREIGN KEY (producto_id) REFERENCES proveedores(id) ON DELETE CASCADE                  
                 )",
                 [],
             )?;
@@ -2059,8 +2727,8 @@ pub mod repositorio {
         }
     }
 
-    impl BaseDatosNoModificable<negocio::Gastos> for GastosDB {
-        fn crear(&mut self, datos: Gastos) -> AppResult<()> {
+    impl BaseDatosNoModificable<negocio::Gasto> for GastosDB {
+        fn crear(&mut self, datos: negocio::Gasto) -> AppResult<()> {
             let con = self.conexion.lock().map_err(|e| {
                 AppError::ErrorPersonal(format!("Error al bloquear la conexion: {}", e))
             })?;
@@ -2219,7 +2887,6 @@ pub mod repositorio {
                 _ => AppError::DbError(e),
             })
         }
-
         fn listar(&self) -> AppResult<Vec<String>> {
             let con = self.conexion.lock().map_err(|e| {
                 AppError::ErrorPersonal(format!("error al bloquear la conexion: {}", e))
@@ -2234,13 +2901,13 @@ pub mod repositorio {
         }
     }
 }
-pub mod servicio {
 
+pub mod servicio {
     //SERVICIO: proporciona funciones usables por los comandos para conectarse a repositorio y verificar las existencias de productos antes de la creacion de una.
     // Además provee informacion de consulta para los comandos.
     //
-    use crate::negocio::{self, AppError, AppResult, Insumo, Receta};
-    use crate::repositorio::{BaseDatos, Bodega, RecetasEnMemoria};
+    use crate::negocio::{self, AppError, AppResult};
+    use crate::repositorio::{BaseDatos, Bodega, RecetasEnMemoria, UsuariosDb};
     use strsim::levenshtein;
 
     pub struct ServicioDeAlmacen {
@@ -2726,6 +3393,117 @@ pub mod servicio {
                 )));
             }
             Ok(self.repositorio.obtener(busqueda)?)
+        }
+    }
+
+    pub struct ServicioDeUsuarios {
+        repositorio: Box<dyn BaseDatos<negocio::Usuario>>,
+    }
+
+    impl ServicioDeUsuarios {
+        pub fn nuevo(repositorio: Box<dyn BaseDatos<negocio::Usuario>>) -> ServicioDeUsuarios {
+            ServicioDeUsuarios { repositorio }
+        }
+
+        pub fn verificar_usuario(&self, contra: &str, usuario: &str) -> AppResult<String> {
+            let usuario = self.repositorio.obtener(&usuario)?;
+            return match usuario.verificar_hash(contra) {
+                Ok(token) => Ok(token),
+                Err(e) => Err(AppError::DatoInvalido(format!("{}", e))),
+            };
+        }
+
+        pub fn agregar(&mut self, nombre: String, contra: String, rol: String) -> AppResult<()> {
+            if self.existe(&nombre)? {
+                println!("Existe, 3170");
+                return Err(AppError::DatoInvalido(format!(
+                    "El usuario: {}, ya existe",
+                    nombre
+                )));
+            }
+
+            let usuario = negocio::Usuario::nuevo(&nombre, rol, &contra)?;
+            match self.repositorio.crear(usuario) {
+                Ok(_) => return Ok(()),
+                Err(e) => return Err(AppError::ErrorPersonal(e.to_string())),
+            }
+        }
+
+        pub fn existe(&self, nombre: &str) -> AppResult<bool> {
+            let lista = self.repositorio.listar()?;
+            if lista.contains(&nombre.to_string()) {
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
+        pub fn eliminar(&mut self, nombre: &str) -> AppResult<()> {
+            if !self.existe(nombre)? {
+                return Err(AppError::DatoInvalido(format!(
+                    "No existe el usuario: {}",
+                    nombre
+                )));
+            }
+            self.repositorio.eliminar(nombre)?;
+            Ok(())
+        }
+
+        pub fn nombre_con_id(&self, id: String) -> AppResult<String> {
+            return self.repositorio.nombre_con_id(&id);
+        }
+
+        pub fn id_con_nombre(&self, nombre: String) -> AppResult<String> {
+            return self.repositorio.id_con_nombre(&nombre);
+        }
+
+        pub fn obtener(&self, busqueda: &str) -> AppResult<(String, String, String)> {
+            if !self.existe(busqueda)? {
+                println!("3213");
+                return Err(AppError::DatoInvalido(format!(
+                    "El usuario: {}, no existe",
+                    busqueda
+                )));
+            }
+            let usuario = self.repositorio.obtener(busqueda)?;
+            Ok((
+                usuario.obtener_id(),
+                usuario.obtener_nombre(),
+                usuario.obtener_rol(),
+            ))
+        }
+
+        pub fn listar(&self) -> AppResult<Vec<String>> {
+            return self.repositorio.listar();
+        }
+
+        pub fn buscar(&self, busqueda: &String) -> AppResult<Vec<String>> {
+            let usuarios = self.repositorio.listar()?;
+            let mut resultados: Vec<String> = Vec::new();
+            //Primera Busqueda por contains:
+            resultados = usuarios
+                .clone()
+                .into_iter()
+                .filter(|usuario| usuario.contains(busqueda))
+                .collect();
+            if !resultados.is_empty() {
+                return Ok(resultados);
+            }
+            //Segunda busqueda
+            let probables = usuarios
+                .into_iter()
+                .min_by_key(|usuario| levenshtein(usuario, busqueda));
+            match probables {
+                Some(opcion) => {
+                    resultados.push(opcion.clone());
+                    Ok(resultados)
+                }
+                None => {
+                    return Err(AppError::DatoInvalido(format!(
+                        "No se encontro el usuario: {}",
+                        busqueda
+                    )));
+                }
+            }
         }
     }
 }

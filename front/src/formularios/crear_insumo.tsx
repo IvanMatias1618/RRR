@@ -1,9 +1,9 @@
 import { useRef } from 'react';
-import type { Insumo } from '../contratos/tipos';
+import type { InsumoCrear } from '../contratos/tipos';
 import '../styles.css';
 
 interface Props {
-  onCrear: (datos: Insumo) => void;
+  onCrear: (datos: InsumoCrear) => void;
   onCerrar?: () => void;
 }
 
@@ -27,7 +27,7 @@ export default function FormularioCrear({onCrear, onCerrar}: Props) {
     if (cantidad <= 0) return;
     if (cantidad_minima <= 0) return;
     if (precio <= 0) return;
-    const datos:Insumo =  {
+    const datos: InsumoCrear =  {
     nombre,
     cantidad,
     cantidad_minima,
